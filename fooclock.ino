@@ -70,7 +70,9 @@ int today [6] = {
 };
 
 
-int offset = 0;
+int offset [2] = {
+    0, 20
+};
 
 int digits[10] = {
   238, //0 0xEE
@@ -110,22 +112,32 @@ void loop()
 {
   time_t t = now();
   //int test [] = {184,220,200,200,240,0}; // Display "Hello"
-  if (second(t) >= offset && second(t) <= offset+10 && minute(t) != cur_min )
+  if (second(t) >= offset[0] && second(t) <= offset[0]+10 && minute(t) != cur_min )
   {
     transition(today);
     //displayDate(t);
-    if (second(t)==offset+10){
+    if (second(t)==offset[0]+10){
         displayDate_(t);
-        offset+=10;
+        offset[0]+=10;
         cur_min = minute(t);
         shift_state = 0;
+    }
+  }
+  else if (second(t) >= offset[1] && second(t) <= offset[1]+10 && minute(t) != cur_min )
+  {
+    displayBinaryTime(t);
+    if(second(t)==offset[1]+10){
+      offset[1]+=10;
     }
   }
   else
   displayTime(t);
 
-  if (offset == 50){
-    offset = 0;
+  if (offset[0] == 50){
+    offset[0] = 0;
+  }
+  if (offset[1] == 50){
+    offset[1] = 0;  
   }
 }
 
