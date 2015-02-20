@@ -66,7 +66,7 @@ int frame [6] = {
     0,0,0,0,0,0
 };
 int today [6] = {
-    0,0,0,0,0,0
+    184,220,200,200,240,0 // Display "Hello"
 };
 
 
@@ -151,7 +151,8 @@ void shift_right(int neu)
 
 void transition(int* a){
   time_t t = now();
-  if (update_counter % 30 == 0 && cur_update != update_counter && shift_state < 6){
+  if (update_counter % 30 == 0 && cur_update != update_counter && shift_state < sizeof(today)/2){    //assuming the Array consits of ints, which have a sizeof 2 on this Arduino
+    Serial.println(sizeof(a));
     cur_sec     = second(t);
     cur_update  = update_counter;
     shift_right(a[5-shift_state]);
