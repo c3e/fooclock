@@ -172,9 +172,8 @@ void loop()
     transition(today);
     //displayDate(t);
     if (second(t)==offset[0]+10){
-        displayDate_(t);
+        updateDate(t);
         offset[0]+=10;
-        cur_min = minute(t);
         shift_state = 0;
     }
   }
@@ -183,6 +182,7 @@ void loop()
     displayBinaryTime(t);
     if(second(t)==offset[1]+10){
       offset[1]+=10;
+      cur_min = minute(t);
     }
   }
   else
@@ -196,7 +196,7 @@ void loop()
   }
 }
 
-void displayDate_(time_t t)
+void updateDate(time_t t)
 {
   today[0] = digits[(day(t)         /10)];
   today[1] = digits[(day(t)         %10)];
