@@ -6,7 +6,7 @@
 
 
 byte mac[] = {
-  0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
+	0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
 // NTP Servers:
 IPAddress timeServer(132, 163, 4, 101); // time-a.timefreq.bldrdoc.gov
 // IPAddress timeServer(132, 163, 4, 102); // time-b.timefreq.bldrdoc.gov
@@ -19,6 +19,8 @@ const int timeZone = 1;     // Central European Time
 //const int timeZone = -8;  // Pacific Standard Time (USA)
 //const int timeZone = -7;  // Pacific Daylight Time (USA)
 
+time_t cur_time     = 0;
+bool update_done    = false;
 int cur_sec         = 0;
 int cur_min         = 0;
 int cur_update      = 0;
@@ -39,252 +41,234 @@ int clockPin        = 2;
 //Pin connected to DS of 74HC595
 int dataPin         = 5;
 
-//                4
-//            +/=====/+
-//           //     //
-//       8  //     // 2
-//         //  16 //
-//        +/=====/+
-//       //     //
-//  128 //     // 32
-//     //  64 //
-//    +/=====/+ O  1
-
 //          4
-//      /=====\
-//     ||     ||
-//   8 ||     ||  2
-//     ||  16 ||
-//      >=====<
-//     ||     ||
-// 128 ||     || 32
-//     ||  64 ||
-//      \=====/ O  1
+//      /======\
+//     ||      ||
+//   8 ||      ||  2
+//     ||  16  ||
+//      >======<
+//     ||      ||
+// 128 ||      || 32
+//     ||  64  ||
+//      \======/ O  1
 
 
 int frame [6] = {
-    0,0,0,0,0,0
+	124,126,174,144,126,0 // Display "Start"
 };
 int today [6] = {
-    184,220,200,200,240,0 // Display "Hello"
+	184,220,200,200,240,0 // Display "Hello"
 };
 
-
-int offset [2] = {
-    0, 20
-};
+int duration = 10;
 
 int digits[10] = {
-  238, //0 0xEE
-  34,  //1 0x22
-  214, //2 0xD6
-  118, //3 0x76
-  58,  //4 0x3A
-  124, //5 0x7C
-  252, //6 0xFC
-  38,  //7 0x26
-  254, //8 0xFE
-  126  //9 0x7E
+	238, //0 0xEE
+	34,  //1 0x22
+	214, //2 0xD6
+	118, //3 0x76
+	58,  //4 0x3A
+	124, //5 0x7C
+	252, //6 0xFC
+	38,  //7 0x26
+	254, //8 0xFE
+	126  //9 0x7E
 };
 
 int letter [26] = {
 
-  174, // A
-  
-  248, // b
-  
-  204, // C
-  
-  242, // d
-  
-  220, // E
-  
-  156, // F
-  
-  126, // g
-  
-  184, // h
-  
-  32,  // i
-  
-  230, // J
-  
-  190, // k
-  
-  200, // L
- 
-  176, // m
-  
-  176, // n
-  
-  240, // o
-  
-  158, // P
-  
-  238, // Q
-  
-  144, // r
-  
-  124, // S
-  
-  126, // t
-  
-  224, // u
-  
-  224, // v
-  
-  26, // w
-  
-  186, // X
-  
-  58, // y
-  
-  214, // Z
+	174, // A  
+	248, // b
+	204, // C
+	242, // d 
+	220, // E  
+	156, // F  
+	126, // g 
+	184, // h 
+	32,  // i  
+	230, // J  
+	190, // k 
+	200, // L 
+	176, // m  
+	176, // n  
+	240, // o  
+	158, // P  
+	238, // Q  
+	144, // r  
+	124, // S  
+	126, // t  
+	224, // u  
+	224, // v  
+	26,  // w  
+	186, // X 
+	58,  // y 
+	214, // Z
 };
+
+#define UP		1
+#define DOWN	2
 
 void setup()
 {
-  pinMode (OutputEnable, OUTPUT);
-  pinMode (latchPin,     OUTPUT);
-  pinMode (clockPin,     OUTPUT);
-  pinMode (dataPin,      OUTPUT);
+	pinMode (OutputEnable, OUTPUT);
+	pinMode (latchPin,     OUTPUT);
+	pinMode (clockPin,     OUTPUT);
+	pinMode (dataPin,      OUTPUT);
 
-  Serial.begin(9600);
+	analogWrite(OutputEnable,125);
 
-  while (Ethernet.begin(mac) == 0) {
-    delay(5000);
-  }
-  Udp.begin(localPort);
-  setSyncProvider(getNtpTime);
+	Timer1.initialize(1000);  // initialize timer1, and set a 1 milli second period
+	Timer1.attachInterrupt(updateDisplay);  // attaches callback() as a timer overflow interrupt
 
-  Timer1.initialize(10000);  // initialize timer1, and set a 10 milli second period
-  Timer1.attachInterrupt(updateDisplay);  // attaches callback() as a timer overflow interrupt
+	Serial.begin(9600);
 
-  analogWrite(OutputEnable,125);
+	while (Ethernet.begin(mac) == 0) {
+		delay(5000);
+	}
+	Udp.begin(localPort);
+	setSyncProvider(getNtpTime);
+
+	update_counter = 0;
 }
 
 void loop()
 {
-  time_t t = now();
-  //int test [] = {184,220,200,200,240,0}; // Display "Hello"
-  if (second(t) >= offset[0] && second(t) <= offset[0]+10 && minute(t) != cur_min )
-  {
-    transition(today);
-    //displayDate(t);
-    if (second(t)==offset[0]+10){
-        updateDate(t);
-        offset[0]+=10;
-        shift_state = 0;
-    }
-  }
-  else if (second(t) >= offset[1] && second(t) <= offset[1]+10 && minute(t) != cur_min )
-  {
-    displayBinaryTime(t);
-    if(second(t)==offset[1]+10){
-      offset[1]+=10;
-      cur_min = minute(t);
-    }
-  }
-  else
-  displayTime(t);
 
-  if (offset[0] == 50){
-    offset[0] = 0;
-  }
-  if (offset[1] == 50){
-    offset[1] = 0;  
-  }
+	//int test [] = {184,220,200,200,240,0}; // Display "Hello"
+
+	time_t timestamp = now();
+	int intervalpos = timestamp%70;
+	if( intervalpos == 0){
+		update_done = false;
+	}
+	if (intervalpos < 10){
+		transition(today);
+		//displayDate(timestamp);
+	}else if (intervalpos > 20 && intervalpos < 30){
+		displayBinaryTime(timestamp);
+	}else{
+		displayTime(timestamp);
+	} 
+
+	if(intervalpos == 50 && !update_done){
+		update_done = true;
+		updateDate(timestamp);
+		shift_state = 0;
+	}
+
+	// Blinkenfoo - comment to remove pulsating light
+	if(update_counter < 200){
+		dim(UP);
+	}
+	if(update_counter > 800){
+		dim(DOWN);
+	}
+
 }
 
 void updateDate(time_t t)
 {
-  today[0] = digits[(day(t)         /10)];
-  today[1] = digits[(day(t)         %10)];
+	today[0] = digits[(day(t)         /10)];
+	today[1] = digits[(day(t)         %10)];
 
-  today[2] = digits[(month(t)       /10)];
-  today[3] = digits[(month(t)       %10)];
+	today[2] = digits[(month(t)       /10)];
+	today[3] = digits[(month(t)       %10)];
 
-  today[4] = digits[((year(t)-2000) /10)];
-  today[5] = digits[((year(t)-2000) %10)];
+	today[4] = digits[((year(t)-2000) /10)];
+	today[5] = digits[((year(t)-2000) %10)];
+}
+
+void dim(int direction){
+	if(direction == DOWN){
+		analogWrite(OutputEnable, update_counter % 200);
+	} else{
+		analogWrite(OutputEnable, 200 - update_counter % 200);
+	}
 }
 
 void shift_right(int neu)
 {
-    for ( int i= 0; i< 5; i++){
-      frame[i] = frame[i+1];
-    }
-    frame[5] = neu;
+	for ( int i= 0; i< 5; i++){
+		frame[i] = frame[i+1];
+	}
+	frame[5] = neu;
 }
 
 void transition(int* a){
-  time_t t = now();
-  if (update_counter % 30 == 0 && cur_update != update_counter && shift_state < sizeof(today)/2){    //assuming the Array consits of ints, which have a sizeof 2 on this Arduino
-    Serial.println(sizeof(a));
-    cur_sec     = second(t);
-    cur_update  = update_counter;
-    shift_right(a[5-shift_state]);
-    shift_state ++;
-  }
+	time_t t = now();
+	if (update_counter % 300 == 0 && cur_update != update_counter && shift_state < sizeof(today)/2){		//assuming the Array contains only ints, 
+																										//which have a sizeof 2 on this Arduino
+		Serial.println(sizeof(a));
+		cur_sec     = second(t);
+		cur_update  = update_counter;
+		shift_right(a[5-shift_state]);
+		shift_state ++;
+	}
 }
 
 void updateDisplay ()
 {
-  // take the latchPin low so
-  // the LEDs don't flicker while you're sending in bits:
-  digitalWrite(latchPin, LOW);
+	// take the latchPin low so
+	// the LEDs don't flicker while you're sending in bits:
+	digitalWrite(latchPin, LOW);
 
-  for(int digitCount=5; digitCount>=0; digitCount--)
-  {
-    shiftOut(dataPin, clockPin, MSBFIRST, frame[digitCount]);
-  }
-  //take the latch pin high so the LEDs will light up:
-  digitalWrite(latchPin, HIGH);
+	for(int digitCount=5; digitCount>=0; digitCount--)
+	{
+		shiftOut(dataPin, clockPin, MSBFIRST, frame[digitCount]);
+	}
+	//take the latch pin high so the LEDs will light up again:
+	digitalWrite(latchPin, HIGH);
 
-  update_counter++;
+	update_counter++;
 
-  if(update_counter == 255){
-    update_counter = 0;
-  }
+	if(update_counter == 1000){
+		update_counter = 0;
+	}
 }
 
 void displayTime(time_t t)
 {
-  frame[5] = digits[(hour(t)         /10)];
-  frame[4] = digits[(hour(t)         %10)];
+	frame[5] = digits[(hour(t)         /10)];
+	frame[4] = digits[(hour(t)         %10)];
 
-  frame[3] = digits[(minute(t)       /10)];
-  frame[2] = digits[(minute(t)       %10)];
+	frame[3] = digits[(minute(t)       /10)];
+	frame[2] = digits[(minute(t)       %10)];
 
-  frame[1] = digits[(second(t)       /10)];
-  frame[0] = digits[(second(t)       %10)];
+	frame[1] = digits[(second(t)       /10)];
+	frame[0] = digits[(second(t)       %10)];
 }
 
 
 void displayDate(time_t t)
 {
-  frame[5] = digits[(day(t)          /10 )];
-  frame[4] = digits[(day(t)          %10 )];
+	frame[5] = digits[(day(t)          /10 )];
+	frame[4] = digits[(day(t)          %10 )];
 
-  frame[3] = digits[(month(t)        /10 )];
-  frame[2] = digits[(month(t)        %10 )];
+	frame[3] = digits[(month(t)        /10 )];
+	frame[2] = digits[(month(t)        %10 )];
 
-  frame[1] = digits[((year(t)-2000)  /10 )];
-  frame[0] = digits[((year(t)-2000)  %10 )];
+	frame[1] = digits[((year(t)-2000)  /10 )];
+	frame[0] = digits[((year(t)-2000)  %10 )];
 }
 
 void displayBinaryTime(time_t t)
 {
-  int digit;
+	int digit;
 
-  for(int digitCount=5; digitCount>=0; digitCount--)
-  {
-    //digit zusammenbauen und dann invertieren
-    digit = 0B00000000;
-    bitWrite(digit,2,(bitRead(hour(t),    digitCount)) );
-    bitWrite(digit,4,(bitRead(minute(t),  digitCount)) );
-    bitWrite(digit,6,(bitRead(second(t),  digitCount)) );
-    frame[digitCount]= digit;
-  }
+	for(int digitCount=5; digitCount>=0; digitCount--)
+	{
+		//digit zusammenbauen und dann invertieren
+		digit = 0;
+
+		digit |= ((hour(t)   & (1 << digitCount))>>digitCount)<<2;
+		digit |= ((minute(t) & (1 << digitCount))>>digitCount)<<4;
+		digit |= ((second(t) & (1 << digitCount))>>digitCount)<<6;
+
+		//bitWrite(digit,2,(bitRead(hour(t),    digitCount)) );
+		//bitWrite(digit,4,(bitRead(minute(t),  digitCount)) );
+		//bitWrite(digit,6,(bitRead(second(t),  digitCount)) );
+		frame[digitCount]= digit;
+	}
 }
 
 
@@ -296,48 +280,48 @@ byte packetBuffer[NTP_PACKET_SIZE]; //buffer to hold incoming & outgoing packets
 
 time_t getNtpTime()
 {
-  while (Udp.parsePacket() > 0) ; // discard any previously received packets
-  Serial.println("Transmit NTP Request");
-  sendNTPpacket(timeServer);
-  uint32_t beginWait = millis();
-  while (millis() - beginWait < 1500) {
-    int size = Udp.parsePacket();
-    if (size >= NTP_PACKET_SIZE) {
-      Serial.println("Receive NTP Response");
-      Udp.read(packetBuffer, NTP_PACKET_SIZE);  // read packet into the buffer
-      unsigned long secsSince1900;
-      // convert four bytes starting at location 40 to a long integer
-      secsSince1900 =  (unsigned long)packetBuffer[40] << 24;
-      secsSince1900 |= (unsigned long)packetBuffer[41] << 16;
-      secsSince1900 |= (unsigned long)packetBuffer[42] << 8;
-      secsSince1900 |= (unsigned long)packetBuffer[43];
-      return secsSince1900 - 2208988800UL + timeZone * SECS_PER_HOUR;
-    }
-  }
-  Serial.println("No NTP Response :-(");
-  return 0; // return 0 if unable to get the time
+	while (Udp.parsePacket() > 0) ; // discard any previously received packets
+	Serial.println("Transmit NTP Request");
+	sendNTPpacket(timeServer);
+	uint32_t beginWait = millis();
+	while (millis() - beginWait < 1500) {
+		int size = Udp.parsePacket();
+		if (size >= NTP_PACKET_SIZE) {
+			Serial.println("Receive NTP Response");
+			Udp.read(packetBuffer, NTP_PACKET_SIZE);  // read packet into the buffer
+			unsigned long secsSince1900;
+			// convert four bytes starting at location 40 to a long integer
+			secsSince1900 =  (unsigned long)packetBuffer[40] << 24;
+			secsSince1900 |= (unsigned long)packetBuffer[41] << 16;
+			secsSince1900 |= (unsigned long)packetBuffer[42] << 8;
+			secsSince1900 |= (unsigned long)packetBuffer[43];
+			return secsSince1900 - 2208988800UL + timeZone * SECS_PER_HOUR;
+		}
+	}
+	Serial.println("No NTP Response :-(");
+	return 0; // return 0 if unable to get the time
 }
 
 // send an NTP request to the time server at the given address
 void sendNTPpacket(IPAddress &address)
 {
-  // set all bytes in the buffer to 0
-  memset(packetBuffer, 0, NTP_PACKET_SIZE);
-  // Initialize values needed to form NTP request
-  // (see URL above for details on the packets)
-  packetBuffer[0]   = 0b11100011;   // LI, Version, Mode
-  packetBuffer[1]   = 0;     // Stratum, or type of clock
-  packetBuffer[2]   = 6;     // Polling Interval
-  packetBuffer[3]   = 0xEC;  // Peer Clock Precision
-  // 8 bytes of zero for Root Delay & Root Dispersion
-  packetBuffer[12]  = 49;
-  packetBuffer[13]  = 0x4E;
-  packetBuffer[14]  = 49;
-  packetBuffer[15]  = 52;
-  // all NTP fields have been given values, now
-  // you can send a packet requesting a timestamp:
-  Udp.beginPacket(address, 123); //NTP requests are to port 123
-  Udp.write(packetBuffer, NTP_PACKET_SIZE);
-  Udp.endPacket();
+	// set all bytes in the buffer to 0
+	memset(packetBuffer, 0, NTP_PACKET_SIZE);
+	// Initialize values needed to form NTP request
+	// (see URL above for details on the packets)
+	packetBuffer[0]   = 0b11100011;   // LI, Version, Mode
+	packetBuffer[1]   = 0;     // Stratum, or type of clock
+	packetBuffer[2]   = 6;     // Polling Interval
+	packetBuffer[3]   = 0xEC;  // Peer Clock Precision
+	// 8 bytes of zero for Root Delay & Root Dispersion
+	packetBuffer[12]  = 49;
+	packetBuffer[13]  = 0x4E;
+	packetBuffer[14]  = 49;
+	packetBuffer[15]  = 52;
+	// all NTP fields have been given values, now
+	// you can send a packet requesting a timestamp:
+	Udp.beginPacket(address, 123); //NTP requests are to port 123
+	Udp.write(packetBuffer, NTP_PACKET_SIZE);
+	Udp.endPacket();
 }
 
