@@ -31,9 +31,10 @@
 #define Y 24
 #define Z 25
 
+#define UP		1
+#define DOWN	2
 
-
-
+// ---------------------------------- Definition of Global Variables -------------------------- //
 
 byte mac[] = {
 	0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
@@ -53,9 +54,11 @@ time_t cur_time     = 0;
 time_t alarm_goal	= 0;
 bool update_done    = false;
 bool second_changed = false;
+bool init_done		= false;
 int cur_update      = 0;
 int shift_state     = 0;
 int update_counter	= 0;
+int spinner_pos		= 0;
 
 EthernetUDP Udp;
 EthernetUDP AlarmClock;
@@ -130,16 +133,13 @@ int letter [26] = {
 };
 
 int frame [6] = {
-	0,letter[T],letter[R],letter[A],letter[T],letter[S] // Display "Start"
+	0,letter[T],letter[R],letter[A],letter[T],letter[S] // Display "Start" (write from right to left into the array)
 };
 int today [6] = {
 	184,220,200,200,240,0 // Display "Hello"
 };
 
-
-#define UP		1
-#define DOWN	2
-
+// ----------------------------------- Setup Code ---------------------------------------------- //
 void setup()
 {
 	pinMode (OutputEnable, OUTPUT);
@@ -162,13 +162,12 @@ void setup()
 	setSyncProvider(getNtpTime);
 
 	update_counter = 0;
+	init_done = true;
 }
 
+// -------------------------------------- Main Loop ------------------------------------------------- //
 void loop()
 {
-
-	//int test [] = {184,220,200,200,240,0}; // Display "Hello"
-
 	time_t timestamp = now();
 	//Sync blinking with second change
 	if(cur_time != timestamp && !second_changed){
@@ -210,50 +209,7 @@ void loop()
 
 }
 
-void updateDate(time_t t)
-{
-	today[0] = digits[(day(t)         /10)];
-	today[1] = digits[(day(t)         %10)];
-
-	today[2] = digits[(month(t)       /10)];
-	today[3] = digits[(month(t)       %10)];
-
-	today[4] = digits[((year(t)-2000) /10)];
-	today[5] = digits[((year(t)-2000) %10)];
-}
-
-void dim(int direction, int lower_limit, int upper_limit){
-	int range = upper_limit - lower_limit;
-	if(direction == DOWN && update_counter % range <= range ){
-		analogWrite(OutputEnable, lower_limit + (update_counter % range));
-		Serial.println("Down ->");
-		Serial.println(lower_limit+update_counter % range);
-	} else{
-		analogWrite(OutputEnable, upper_limit - (update_counter % range));
-		Serial.println("UP ->");
-		Serial.println(upper_limit - update_counter % range);
-	}
-}
-
-void shift_right(int neu)
-{
-	for ( int i= 0; i< 5; i++){
-		frame[i] = frame[i+1];
-	}
-	frame[5] = neu;
-}
-
-void transition(int* a){
-	time_t t = now();
-	if (update_counter % 300 == 0 && cur_update != update_counter && shift_state < sizeof(today)/2){		//assuming the Array contains only ints, 
-																										//which have a sizeof 2 on this Arduino
-		Serial.println(sizeof(a));
-		cur_update  = update_counter;
-		shift_right(a[5-shift_state]);
-		shift_state ++;
-	}
-}
-
+// ---------------------- Interrupt Handler (Timer1) ------------------- //
 void updateDisplay ()
 {
 	// take the latchPin low so
@@ -272,20 +228,26 @@ void updateDisplay ()
 	if(update_counter == 1000){
 		update_counter = 0;
 	}
+
+	if(!init_done){
+		if(update_counter % 100 == 0){
+			spin(0);
+		}
+	}
 }
 
-void displayTime(time_t t)
+// -------------------------------- Date Functions ---------------------- //
+void updateDate(time_t t)
 {
-	frame[5] = digits[(hour(t)         /10)];
-	frame[4] = digits[(hour(t)         %10)];
+	today[0] = digits[(day(t)         /10)];
+	today[1] = digits[(day(t)         %10)];
 
-	frame[3] = digits[(minute(t)       /10)];
-	frame[2] = digits[(minute(t)       %10)];
+	today[2] = digits[(month(t)       /10)];
+	today[3] = digits[(month(t)       %10)];
 
-	frame[1] = digits[(second(t)       /10)];
-	frame[0] = digits[(second(t)       %10)];
+	today[4] = digits[((year(t)-2000) /10)];
+	today[5] = digits[((year(t)-2000) %10)];
 }
-
 
 void displayDate(time_t t)
 {
@@ -297,6 +259,19 @@ void displayDate(time_t t)
 
 	frame[1] = digits[((year(t)-2000)  /10 )];
 	frame[0] = digits[((year(t)-2000)  %10 )];
+}
+
+// ------------------------------- Time Functions -------------------- //
+void displayTime(time_t t)
+{
+	frame[5] = digits[(hour(t)         /10)];
+	frame[4] = digits[(hour(t)         %10)];
+
+	frame[3] = digits[(minute(t)       /10)];
+	frame[2] = digits[(minute(t)       %10)];
+
+	frame[1] = digits[(second(t)       /10)];
+	frame[0] = digits[(second(t)       %10)];
 }
 
 void displayBinaryTime(time_t t)
@@ -318,6 +293,58 @@ void displayBinaryTime(time_t t)
 		frame[digitCount]= digit;
 	}
 }
+
+
+// ----------------------------------- System Functions ----------------------------------- //
+void dim(int direction, int lower_limit, int upper_limit){
+	int range = upper_limit - lower_limit;
+	if(direction == DOWN && update_counter % range <= range ){
+		analogWrite(OutputEnable, lower_limit + (update_counter % range));
+		Serial.println("Down ->");
+		Serial.println(lower_limit+update_counter % range);
+	} else{
+		analogWrite(OutputEnable, upper_limit - (update_counter % range));
+		Serial.println("UP ->");
+		Serial.println(upper_limit - update_counter % range);
+	}
+}
+
+void spin(int digit){
+	if(spinner_pos >= 6)spinner_pos = 0;
+	switch (spinner_pos){
+		case  0: frame[digit] =   4; break;
+		case  1: frame[digit] =   2; break;
+		case  2: frame[digit] =  32; break;
+		case  3: frame[digit] =  64; break;
+		case  4: frame[digit] = 128; break;
+		case  5: frame[digit] =   8; break;
+		default: frame[digit] =   0; break;
+	}
+	spinner_pos ++;
+};
+
+void shift_right(int neu)
+{
+	for ( int i= 0; i< 5; i++){
+		frame[i] = frame[i+1];
+	}
+	frame[5] = neu;
+}
+
+void transition(int* a){
+	time_t t = now();
+	if (update_counter % 300 == 0 && cur_update != update_counter && shift_state < sizeof(today)/2){		//assuming the Array contains only ints, 
+																										//which have a sizeof 2 on this Arduino
+		Serial.println(sizeof(a));
+		cur_update  = update_counter;
+		shift_right(a[5-shift_state]);
+		shift_state ++;
+	}
+}
+
+
+
+
 
 
 /*-------- Alarm Clock code ---------*/
