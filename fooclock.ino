@@ -34,6 +34,9 @@
 #define UP		1
 #define DOWN	2
 
+#define light_lvl_standard	60
+#define light_lvl_risen		255
+
 // ---------------------------------- Definition of Global Variables -------------------------- //
 
 byte mac[] = {
@@ -44,21 +47,24 @@ IPAddress timeServer(132, 163, 4, 101); // time-a.timefreq.bldrdoc.gov
 // IPAddress timeServer(132, 163, 4, 103); // time-c.timefreq.bldrdoc.gov
 
 
-const int timeZone = 1;     // Central European Time
+//const int timeZone = 1;     // Central European Time
+const int timeZone = 2;     // Central European Time (summertime)
+
 //const int timeZone = -5;  // Eastern Standard Time (USA)
 //const int timeZone = -4;  // Eastern Daylight Time (USA)
 //const int timeZone = -8;  // Pacific Standard Time (USA)
 //const int timeZone = -7;  // Pacific Daylight Time (USA)
 
-time_t cur_time     = 0;
-time_t alarm_goal	= 0;
-bool update_done    = false;
-bool second_changed = false;
-bool init_done		= false;
-int cur_update      = 0;
-int shift_state     = 0;
-int update_counter	= 0;
-int spinner_pos		= 0;
+time_t cur_time			= 0;
+time_t alarm_goal		= 0;
+bool update_done		= false;
+bool second_changed		= false;
+bool init_done			= false;
+bool transition_active	= false;
+int cur_update			= 0;
+int shift_state			= 0;
+int update_counter		= 0;
+int spinner_pos			= 0;
 
 EthernetUDP Udp;
 EthernetUDP AlarmClock;
@@ -147,20 +153,18 @@ void setup()
 	pinMode (clockPin,     OUTPUT);
 	pinMode (dataPin,      OUTPUT);
 
-	analogWrite(OutputEnable,125);
+	analogWrite(OutputEnable,light_lvl_standard);
 
-	Timer1.initialize(1000);  // initialize timer1, and set a 1 milli second period
+	Timer1.initialize(1000);				// initialize timer1, and set a 1 milli second period
 	Timer1.attachInterrupt(updateDisplay);  // attaches callback() as a timer overflow interrupt
-	updateDisplay();
 
 	Serial.begin(9600);
 
 	while (Ethernet.begin(mac) == 0) {
-		delay(5000);
+		delay(5000);						// Wait for a valid IP-Address				
 	}
 	Udp.begin(localPort);
 	setSyncProvider(getNtpTime);
-
 	update_counter = 0;
 	init_done = true;
 }
@@ -181,7 +185,8 @@ void loop()
 		update_done = false;
 	}
 	if (intervalpos < 10){
-		transition(today);
+		//transition(today);
+		combine(today);
 		//displayDate(timestamp);
 	}else if (intervalpos > 20 && intervalpos < 30){
 		displayBinaryTime(timestamp);
@@ -190,17 +195,18 @@ void loop()
 	} 
 
 	if(intervalpos == 50 && !update_done){
-		update_done = true;
+		update_done			= true;
+		transition_active	= false;
+		shift_state			= 0;
 		updateDate(timestamp);
-		shift_state = 0;
 	}
 
 	// Blinkenfoo - comment to remove pulsating light
-	if(update_counter < 125  && timestamp%600 == 0 ){
-		dim(UP,125,255);
+	if(update_counter < 125   && timestamp%600 == 0 ){
+		dim(UP,light_lvl_standard,light_lvl_risen);
 	}
-	if(update_counter > 875  && timestamp%600 == 0 ){
-		dim(DOWN,125,255);
+	if(update_counter > 875   && timestamp%600 == 0 ){
+		dim(DOWN,light_lvl_standard,light_lvl_risen);
 	}
 	if(update_counter == 900){
 		second_changed = true;
@@ -298,14 +304,18 @@ void displayBinaryTime(time_t t)
 // ----------------------------------- System Functions ----------------------------------- //
 void dim(int direction, int lower_limit, int upper_limit){
 	int range = upper_limit - lower_limit;
+	int shift_start = 1000 - range;
+	int write_out = 0;
 	if(direction == DOWN && update_counter % range <= range ){
-		analogWrite(OutputEnable, lower_limit + (update_counter % range));
+		write_out = 255 - (upper_limit - (update_counter - shift_start) % range);
+		analogWrite(OutputEnable, write_out);
 		Serial.println("Down ->");
-		Serial.println(lower_limit+update_counter % range);
+		Serial.println(write_out);
 	} else{
-		analogWrite(OutputEnable, upper_limit - (update_counter % range));
+		write_out = 255 - (lower_limit + (update_counter % range) ); 
+		analogWrite(OutputEnable, write_out);
 		Serial.println("UP ->");
-		Serial.println(upper_limit - update_counter % range);
+		Serial.println(write_out);
 	}
 }
 
@@ -322,6 +332,38 @@ void spin(int digit){
 	}
 	spinner_pos ++;
 };
+
+void combine(int* a){
+	static int i = 0;
+	static int j = 0;
+	int current [6];
+
+	if(transition_active == false){
+			transition_active = true;
+			j = 0;
+	}
+
+	if(update_counter % 50 == 0 && j < 12){
+		Serial.print("i : ");
+		Serial.print(i);
+		Serial.print("  j :  ");
+		Serial.println(j);
+
+		if(j % 2 == 0){
+			frame [5-i] = 0;
+		}
+		else{
+			frame [5-i] = a[i];
+			i++;
+		}
+
+		if(i == 6){	i = 0;}
+
+		j++;	
+	}
+}
+
+
 
 void shift_right(int neu)
 {
