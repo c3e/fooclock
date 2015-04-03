@@ -61,10 +61,13 @@ bool update_done		= false;
 bool second_changed		= false;
 bool init_done			= false;
 bool transition_active	= false;
+bool swipe_active		= false;	
+bool shrink_active		= false; // Maybe we should move them to a single variable an set or unset bits inside the variable
 int cur_update			= 0;
 int shift_state			= 0;
 int update_counter		= 0;
 int spinner_pos			= 0;
+int animation			= 0;
 
 EthernetUDP Udp;
 EthernetUDP AlarmClock;
@@ -141,8 +144,8 @@ int letter [26] = {
 int frame [6] = {
 	0,letter[T],letter[R],letter[A],letter[T],letter[S] // Display "Start" (write from right to left into the array)
 };
-int today [6] = {
-	184,220,200,200,240,0 // Display "Hello"
+int today [7] = {
+	184,220,200,200,240,0,0 // Display "Hello"
 };
 
 // ----------------------------------- Setup Code ---------------------------------------------- //
@@ -185,10 +188,30 @@ void loop()
 		update_done = false;
 	}
 	if (intervalpos < 10){
+		switch (animation)
+		{
+		case 0:transition(today);
+			break;
+		case 1:combine(today);
+			break;
+		case 2:swipe(UP,today);
+			break;
+		case 3:swipe(DOWN, today);
+			break;
+		case 4:shrink(UP, today);
+			break;
+		case 5:shrink(DOWN, today);
+			break;
+		default:displayDate(timestamp);
+			break;
+		}
+		//shrink(DOWN,today);
 		//transition(today);
-		combine(today);
+		//combine(today);
+		//swipe(UP,today);
 		//displayDate(timestamp);
-	}else if (intervalpos > 20 && intervalpos < 30){
+	}
+	else if (intervalpos > 20 && intervalpos < 30){
 		displayBinaryTime(timestamp);
 	}else{
 		displayTime(timestamp);
@@ -197,15 +220,19 @@ void loop()
 	if(intervalpos == 50 && !update_done){
 		update_done			= true;
 		transition_active	= false;
+		swipe_active		= false;
+		shrink_active		= false;
 		shift_state			= 0;
 		updateDate(timestamp);
+
+		animation = (int) (rand() % 6);
 	}
 
 	// Blinkenfoo - comment to remove pulsating light
-	if(update_counter < 125   && timestamp%600 == 0 ){
+	if(update_counter < (light_lvl_risen-light_lvl_standard)				&& timestamp%600 == 0 ){
 		dim(UP,light_lvl_standard,light_lvl_risen);
 	}
-	if(update_counter > 875   && timestamp%600 == 0 ){
+	if(update_counter > (1000 - (light_lvl_risen -  light_lvl_standard))	&& timestamp%600 == 0 ){
 		dim(DOWN,light_lvl_standard,light_lvl_risen);
 	}
 	if(update_counter == 900){
@@ -306,13 +333,22 @@ void dim(int direction, int lower_limit, int upper_limit){
 	int range = upper_limit - lower_limit;
 	int shift_start = 1000 - range;
 	int write_out = 0;
-	if(direction == DOWN && update_counter % range <= range ){
-		write_out = 255 - (upper_limit - (update_counter - shift_start) % range);
+	int local_counter = 0;
+
+	if(update_counter > range){
+		local_counter = update_counter - shift_start;
+	}
+	else{
+		local_counter = update_counter;
+	}
+
+	if(direction == DOWN && local_counter % range <= range ){
+		write_out = 255 - (upper_limit - (local_counter) % range);
 		analogWrite(OutputEnable, write_out);
 		Serial.println("Down ->");
 		Serial.println(write_out);
 	} else{
-		write_out = 255 - (lower_limit + (update_counter % range) ); 
+		write_out = 255 - (lower_limit + (local_counter % range) ); 
 		analogWrite(OutputEnable, write_out);
 		Serial.println("UP ->");
 		Serial.println(write_out);
@@ -333,6 +369,135 @@ void spin(int digit){
 	spinner_pos ++;
 };
 
+void shrink(int direction, int* new_data){
+	static int j = 0;
+	static int height = 0;
+	int bitmask = 0;
+
+	if(shrink_active == false){
+		shrink_active = true;
+		j = 0;
+		if(direction == UP){
+			height = 2;
+		}
+		else{
+			height = 0;
+		}
+	}
+
+	switch (height)
+	{
+	case 0: bitmask = 0x44;
+		break;
+	case 1: bitmask = 0xAA;
+		break;
+	case 2: bitmask = 0x10;
+		break;
+	default:
+		break;
+	}
+
+	if(update_counter % 100 == 0 && j < 7){
+		if(j < 3){
+			for(int digit= 0; digit < 6; digit++){
+				frame[digit] &= ~bitmask;
+			}
+
+			if(direction == DOWN){
+				height++;
+			}
+			else{
+				height--;
+			}
+			Serial.print("Shrink.J = ");
+			Serial.println(j);
+		}
+		else{
+			for(int digit= 0; digit < 6; digit++){
+				frame[5-digit] |= new_data[digit] & bitmask;
+			}
+
+			if(direction == DOWN){
+				height--;
+			}
+			else{
+				height++;
+			}
+			Serial.print("Shrink.J = ");
+			Serial.println(j);
+
+		}
+
+		j++;
+	}
+}
+
+void swipe(int direction, int* new_data){
+	static int j = 0;
+	static int height = 0;
+	int bitmask = 0;
+
+	if(swipe_active == false){
+		swipe_active = true;
+		j = 0;
+		if(direction == UP){
+			height = 4;
+		}else{
+			height = 0;
+		}
+	}
+
+	switch(height){
+	case 0: bitmask = 0x04;
+		break;
+	case 1: bitmask = 0x0A;
+		break;
+	case 2: bitmask = 0x10;
+		break;
+	case 3: bitmask = 0xA0;
+		break;
+	case 4: bitmask = 0x40;
+		break;
+	default:
+		break;
+	}
+
+
+	if(update_counter % 60 == 0 && j < 11){
+		if(j < 5){
+			for(int digit= 0; digit < 6; digit++){
+				frame[digit] &= ~bitmask;
+			}
+
+			if(direction == DOWN){
+				height++;
+			}
+			else{
+				height--;
+			}
+			Serial.print("Swipe. J = ");
+			Serial.println(j);
+		}
+		else{
+			for(int digit= 0; digit < 6; digit++){
+				frame[5-digit] |= new_data[digit] & bitmask;
+			}
+
+			if(direction == DOWN){
+				height--;
+			}
+			else{
+				height++;
+			}
+			Serial.print("Swipe. J = ");
+			Serial.println(j);
+
+		}
+
+		j++;
+	}
+};
+
 void combine(int* a){
 	static int i = 0;
 	static int j = 0;
@@ -340,17 +505,21 @@ void combine(int* a){
 
 	if(transition_active == false){
 			transition_active = true;
+			memcpy(current,frame,6*sizeof(int));
 			j = 0;
 	}
 
-	if(update_counter % 50 == 0 && j < 12){
+	if(update_counter % 33 == 0 && j < 18){
 		Serial.print("i : ");
 		Serial.print(i);
 		Serial.print("  j :  ");
 		Serial.println(j);
 
-		if(j % 2 == 0){
-			frame [5-i] = 0;
+		if(j % 3 == 0){
+			frame [5-i] |= a[i];
+		}
+		else if(j % 3 == 1){
+			frame [5-i] &= ~current[i];
 		}
 		else{
 			frame [5-i] = a[i];
@@ -375,11 +544,11 @@ void shift_right(int neu)
 
 void transition(int* a){
 	time_t t = now();
-	if (update_counter % 300 == 0 && cur_update != update_counter && shift_state < sizeof(today)/2){		//assuming the Array contains only ints, 
+	if (update_counter % 150 == 0 && cur_update != update_counter && shift_state < sizeof(today)/2){		//assuming the Array contains only ints, 
 																										//which have a sizeof 2 on this Arduino
 		Serial.println(sizeof(a));
 		cur_update  = update_counter;
-		shift_right(a[5-shift_state]);
+		shift_right(a[6-shift_state]);
 		shift_state ++;
 	}
 }
